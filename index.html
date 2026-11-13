@@ -279,12 +279,72 @@ async function renderFeed(id,posts){
   box.appendChild(el);listenComments(p.id);
  }
 }
-async function toggleLike(id){
- try{
-  let ref=db.collection("posts").doc(id),like=ref.collection("likes").doc(currentUser.uid);
-  await db.runTransaction(async tx=>{let s=await tx.get(like);if(s.exists){tx.delete(like);tx.update(ref,{likes:Field.increment(-1)})}else{tx.set(like,{uid:currentUser.uid,createdAt:Field.serverTimestamp()});tx.update(ref,{likes:Field.increment(1)})}});
-  let p=postCache.find(x=>x.id===id);if(p&&p.uid!==currentUser.uid)notify(p.uid,"like",id);
- }catch(e){error(e)}
+async function toggleLike(id) {
+  const ref = db.collection("posts").doc(id);
+  const like = ref.collection("likes").doc(currentUser.uid);
+
+  const buttons = document.querySelectorAll(
+    `button[onclick="toggleLike('${id}')"]`
+  );
+
+  const post = postCache.find(p => p.id === id);
+  if (!post) return;
+
+  const card = buttons[0]?.closest("article");
+  if (!card) return;
+
+  const likeButton = card.querySelector(".post-actions button");
+  const countElement = card.querySelector(".post-stats span");
+
+  if (!likeButton || !countElement) return;
+
+  const wasLiked = likeButton.classList.contains("liked");
+  const oldCount = Number(countElement.textContent) || 0;
+
+  // Update the interface immediately.
+  likeButton.classList.toggle("liked", !wasLiked);
+  likeButton.textContent = wasLiked ? "♡ Like" : "♥ Liked";
+  countElement.textContent = Math.max(0, oldCount + (wasLiked ? -1 : 1));
+
+  likeButton.disabled = true;
+
+  try {
+    await db.runTransaction(async tx => {
+      const snapshot = await tx.get(like);
+
+      if (snapshot.exists) {
+        tx.delete(like);
+        tx.update(ref, {
+          likes: Field.increment(-1)
+        });
+      } else {
+        tx.set(like, {
+          uid: currentUser.uid,
+          createdAt: Field.serverTimestamp()
+        });
+
+        tx.update(ref, {
+          likes: Field.increment(1)
+        });
+      }
+    });
+
+    post.likes = Math.max(0, oldCount + (wasLiked ? -1 : 1));
+
+    if (!wasLiked && post.uid !== currentUser.uid) {
+      notify(post.uid, "like", id);
+    }
+
+  } catch (e) {
+    // Restore the original interface if the request fails.
+    likeButton.classList.toggle("liked", wasLiked);
+    likeButton.textContent = wasLiked ? "♥ Liked" : "♡ Like";
+    countElement.textContent = oldCount;
+    error(e);
+
+  } finally {
+    likeButton.disabled = false;
+  }
 }
 async function addComment(id){
  try{let input=$("comment-"+id),text=input.value.trim();if(!text)return;let p=postCache.find(x=>x.id===id);await db.collection("posts").doc(id).collection("comments").add({uid:currentUser.uid,author:myProfile.displayName,text,createdAt:Field.serverTimestamp()});input.value="";if(p&&p.uid!==currentUser.uid)notify(p.uid,"comment",id)}catch(e){error(e)}
