@@ -137,25 +137,61 @@ function admin(){return !!currentUser&&ADMIN_UIDS.includes(currentUser.uid)&&myP
 
 async function register() {
   try {
-    const username = document.getElementById("regUsername").value.trim().toLowerCase();
+    const name = $("regName").value.trim();
+    const username = $("regUsername").value.trim().toLowerCase();
+    const email = $("regEmail").value.trim();
+    const password = $("regPassword").value;
 
-    alert("Starting Firestore test...");
+    if (!name || !username || !email || !password) {
+      return toast("Complete all fields.");
+    }
+
+    if (!/^[a-z0-9_]{3,20}$/.test(username)) {
+      return toast("Username: 3–20 letters, numbers or underscores.");
+    }
+
+    if (password.length < 8) {
+      return toast("Password must be at least 8 characters.");
+    }
 
     const uname = db.collection("usernames").doc(username);
-
-    alert("About to read Firestore...");
-
     const existing = await uname.get();
 
-    alert("Firestore read succeeded!\nUsername exists: " + existing.exists);
+    if (existing.exists) {
+      return toast("Username already taken.");
+    }
+
+    const cred = await auth.createUserWithEmailAndPassword(email, password);
+    const uid = cred.user.uid;
+
+    await db.runTransaction(async tx => {
+      const snap = await tx.get(uname);
+
+      if (snap.exists) {
+        throw new Error("Username already taken.");
+      }
+
+      tx.set(uname, { uid });
+
+      tx.set(db.collection("users").doc(uid), {
+        uid,
+        displayName: name,
+        username,
+        bio: "Welcome to BLAZE NETWORK!",
+        avatar: "",
+        cover: "",
+        role: "user",
+        verified: false,
+        createdAt: Field.serverTimestamp()
+      });
+    });
+
+    await cred.user.sendEmailVerification();
+    toast("Account created! Check your email to verify it.");
 
   } catch (e) {
-    alert(
-      "FIRESTORE ERROR\n" +
-      "Code: " + (e.code || "unknown") +
-      "\nMessage: " + (e.message || String(e))
-    );
-    console.error(e);
+    console.error("Registration error:", e);
+    error(e);
   }
 }
 
